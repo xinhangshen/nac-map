@@ -56,10 +56,9 @@
 
     let marker, boxLayer;
 
-    // Corrected decodeNAC function to accurately calculate SW corner and resolution
     function decodeNAC(nac) {
       const [lonCode, latCode] = nac.toUpperCase().split(' ');
-      const level = lonCode.length; // Level is determined by the length of the code strings
+      const level = lonCode.length;
       let lonNorm = 0, latNorm = 0, factor = 1;
 
       for (let i = 0; i < level; i++) {
@@ -68,11 +67,9 @@
         latNorm += nacChars.indexOf(latCode[i]) * factor;
       }
 
-      // Calculate the size of one NAC cell at this level
-      const lonResolution = factor * 360; // Represents degrees of longitude for one cell
-      const latResolution = factor * 180; // Represents degrees of latitude for one cell
+      const lonResolution = factor * 360;
+      const latResolution = factor * 180;
 
-      // Convert normalized values to actual lat/lon (SW corner)
       const lon = lonNorm * 360 - 180;
       const lat = latNorm * 180 - 90;
 
@@ -87,8 +84,7 @@
       const i1 = nacChars.indexOf(fromChar);
       const i2 = nacChars.indexOf(toChar);
 
-      // Handle cases where the range crosses the 180/-180 meridian
-      if (i1 === -1 || i2 === -1) return [component]; // Should not happen with valid NACs
+      if (i1 === -1 || i2 === -1) return [component];
       if (i1 > i2) {
           let components = [];
           for (let i = i1; i < base; i++) components.push(prefix + nacChars[i]);
@@ -99,7 +95,6 @@
       }
     }
 
-    // Corrected getBoundingBox to accurately define the full bounding box
     function getBoundingBox(lonCodeRaw, latCodeRaw) {
       const lonComponents = expandNACComponent(lonCodeRaw);
       const latComponents = expandNACComponent(latCodeRaw);
@@ -111,13 +106,11 @@
           const nac = `${lonComp} ${latComp}`;
           const { lat, lon, lonResolution, latResolution } = decodeNAC(nac);
 
-          // For each individual NAC cell, calculate its SW and NE corners
           const cellSWLat = lat;
           const cellSWLon = lon;
           const cellNELat = lat + latResolution;
           const cellNELon = lon + lonResolution;
 
-          // Update the overall min/max for the entire bounding box
           minLat = Math.min(minLat, cellSWLat);
           maxLat = Math.max(maxLat, cellNELat);
           minLon = Math.min(minLon, cellSWLon);
@@ -171,15 +164,14 @@
         map.fitBounds(bounds);
       } else if (/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(query)) {
         const [lat, lon] = query.split(',').map(parseFloat);
-        // For point, show a marker. The level parameter in showPointOrBox is for NAC resolution.
-        showPointOrBox(lat, lon, 6); // Default to a higher resolution NAC for a point
+        showPointOrBox(lat, lon, 6);
       } else {
         fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json`)
           .then(res => res.json())
           .then(results => {
             if (results.length > 0) {
               const { lat, lon } = results[0];
-              showPointOrBox(parseFloat(lat), parseFloat(lon), 6); // Default to a higher resolution NAC for a point
+              showPointOrBox(parseFloat(lat), parseFloat(lon), 6);
             } else {
               alert('Location not found');
             }
@@ -187,14 +179,11 @@
       }
     }
 
-    // Refined showPointOrBox to use getBoundingBox for area display
     function showPointOrBox(lat, lon, level) {
       const nac = encodeNAC(level, lon, lat);
       if (marker) map.removeLayer(marker);
       if (boxLayer) map.removeLayer(boxLayer);
 
-      // If the query is a point, display a marker and a small NAC box around it
-      // For general searches, we will display the specific NAC cell's bounding box
       const [lonCode, latCode] = nac.split(' ');
       const bounds = getBoundingBox(lonCode, latCode);
 
@@ -208,7 +197,19 @@
         handleSearch();
       }
     });
+
+    // New code to handle URL parameters on page load
+    window.onload = function() {
+      const params = new URLSearchParams(window.location.search);
+      const nacFromUrl = params.get('input');
+      if (nacFromUrl) {
+        searchInput.value = nacFromUrl;
+        handleSearch();
+      } else {
+        // If no NAC is provided in the URL, show the current map center's NAC
+        showNAC(map.getCenter().lat, map.getCenter().lng);
+      }
+    };
   </script>
 </body>
 </html>
-```
