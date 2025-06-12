@@ -2,7 +2,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>NAC-Enabled OSM Map</title>
+  <title>NAC Map with Full Bounding and Hyphen Support</title>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
@@ -57,6 +57,57 @@
 
     let marker, boxLayer;
 
+    function decodeNAC(nac, center = false) {
+      const [lonCode, latCode] = nac.toUpperCase().split(' ');
+      const level = lonCode.length;
+      let lonNorm = 0, latNorm = 0, factor = 1;
+
+      for (let i = 0; i < level; i++) {
+        factor /= base;
+        lonNorm += nacChars.indexOf(lonCode[i]) * factor;
+        latNorm += nacChars.indexOf(latCode[i]) * factor;
+      }
+
+      const resolution = Math.pow(base, -level);
+      const lon = lonNorm * 360 - 180 + (center ? resolution * 180 / 2 : 0);
+      const lat = latNorm * 180 - 90 + (center ? resolution * 90 / 2 : 0);
+
+      return { level, lon, lat, resolution };
+    }
+
+    function expandNACComponent(component) {
+      if (!component.includes('-')) return [component];
+      const match = component.match(/^(.*?)([0-9BCDFGHJKLMNPQRSTVWXZ])-([0-9BCDFGHJKLMNPQRSTVWXZ])$/);
+      if (!match) return [component];
+      const [_, prefix, from, to] = match;
+      const i1 = nacChars.indexOf(from);
+      const i2 = nacChars.indexOf(to);
+      if (i1 < 0 || i2 < 0 || i1 > i2) return [component];
+      return nacChars.slice(i1, i2 + 1).split('').map(ch => prefix + ch);
+    }
+
+    function getBoundingBox(lonCodeRaw, latCodeRaw) {
+      const lonCodes = expandNACComponent(lonCodeRaw);
+      const latCodes = expandNACComponent(latCodeRaw);
+
+      let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+
+      for (const lonCode of lonCodes) {
+        for (const latCode of latCodes) {
+          const nac = `${lonCode} ${latCode}`;
+          const { lat, lon, resolution } = decodeNAC(nac, false);
+          const lat2 = lat + resolution * 90;
+          const lon2 = lon + resolution * 360;
+          minLat = Math.min(minLat, lat);
+          maxLat = Math.max(maxLat, lat2);
+          minLon = Math.min(minLon, lon);
+          maxLon = Math.max(maxLon, lon2);
+        }
+      }
+
+      return L.latLngBounds([minLat, minLon], [maxLat, maxLon]);
+    }
+
     function encodeNAC(level, lon, lat) {
       let longNorm = (lon + 180) / 360;
       let latNorm = (lat + 90) / 180;
@@ -72,35 +123,6 @@
       }
 
       return lonCode + " " + latCode;
-    }
-
-    function decodeNAC(nac) {
-      const [lonCode, latCode] = nac.toUpperCase().split(' ');
-      const level = lonCode.length;
-      let lonNorm = 0, latNorm = 0, factor = 1;
-
-      for (let i = 0; i < level; i++) {
-        factor /= base;
-        lonNorm += nacChars.indexOf(lonCode[i]) * factor;
-        latNorm += nacChars.indexOf(latCode[i]) * factor;
-      }
-
-      const resolution = Math.pow(base, -level);
-      const lon = lonNorm * 360 - 180 + resolution * 180 / 2;
-      const lat = latNorm * 180 - 90 + resolution * 90 / 2;
-
-      return { level, lon, lat, resolution };
-    }
-
-    function expandRange(code) {
-      if (!code.includes('-')) return [code];
-      const match = code.match(/^(.*?)([0-9BCDFGHJKLMNPQRSTVWXZ])-([0-9BCDFGHJKLMNPQRSTVWXZ])$/);
-      if (!match) return [code];
-      const [_, base, from, to] = match;
-      const i1 = nacChars.indexOf(from);
-      const i2 = nacChars.indexOf(to);
-      if (i1 < 0 || i2 < 0 || i1 > i2) return [code];
-      return nacChars.slice(i1, i2 + 1).split('').map(ch => base + ch);
     }
 
     function showNAC(lat, lon) {
@@ -122,27 +144,13 @@
       const query = searchInput.value.trim().toUpperCase();
       if (!query) return;
 
-      if (/^[0-9BCDFGHJKLMNPQRSTVWXZ\-]{2,}(?: [0-9BCDFGHJKLMNPQRSTVWXZ\-]{2,})?$/.test(query)) {
+      if (/^[0-9BCDFGHJKLMNPQRSTVWXZ\-]+ [0-9BCDFGHJKLMNPQRSTVWXZ\-]+$/.test(query)) {
         const [lonCodeRaw, latCodeRaw] = query.split(' ');
-        const lonCodes = expandRange(lonCodeRaw);
-        const latCodes = expandRange(latCodeRaw);
-
-        let bounds = null;
-        for (const lon of lonCodes) {
-          for (const lat of latCodes) {
-            const { resolution, lat: cLat, lon: cLon } = decodeNAC(`${lon} ${lat}`);
-            const sw = [cLat - resolution * 90 / 2, cLon - resolution * 180 / 2];
-            const ne = [cLat + resolution * 90 / 2, cLon + resolution * 180 / 2];
-            const cellBounds = L.latLngBounds(sw, ne);
-            bounds = bounds ? bounds.extend(cellBounds) : cellBounds;
-          }
-        }
-
+        const bounds = getBoundingBox(lonCodeRaw, latCodeRaw);
         if (boxLayer) map.removeLayer(boxLayer);
         if (marker) map.removeLayer(marker);
         boxLayer = L.rectangle(bounds, { color: 'red', weight: 2 }).addTo(map);
         map.fitBounds(bounds);
-
       } else if (/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(query)) {
         const [lat, lon] = query.split(',').map(parseFloat);
         showPointOrBox(lat, lon, 4);
