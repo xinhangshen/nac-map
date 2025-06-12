@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html>
 <head>
@@ -57,9 +56,10 @@
 
     let marker, boxLayer;
 
-    function decodeNAC(nac, center = false) {
+    // Corrected decodeNAC function to accurately calculate SW corner and resolution
+    function decodeNAC(nac) {
       const [lonCode, latCode] = nac.toUpperCase().split(' ');
-      const level = lonCode.length;
+      const level = lonCode.length; // Level is determined by the length of the code strings
       let lonNorm = 0, latNorm = 0, factor = 1;
 
       for (let i = 0; i < level; i++) {
@@ -68,43 +68,62 @@
         latNorm += nacChars.indexOf(latCode[i]) * factor;
       }
 
-      const resolution = Math.pow(base, -level);
-      const lon = lonNorm * 360 - 180 + (center ? resolution * 180 : 0) / 2;
-      const lat = latNorm * 180 - 90 + (center ? resolution * 180 : 0) / 2;
+      // Calculate the size of one NAC cell at this level
+      const lonResolution = factor * 360; // Represents degrees of longitude for one cell
+      const latResolution = factor * 180; // Represents degrees of latitude for one cell
 
-      return { level, lon, lat, resolution };
+      // Convert normalized values to actual lat/lon (SW corner)
+      const lon = lonNorm * 360 - 180;
+      const lat = latNorm * 180 - 90;
+
+      return { level, lon, lat, lonResolution, latResolution };
     }
 
     function expandNACComponent(component) {
       if (!component.includes('-')) return [component];
       const match = component.match(/^(.*?)([0-9BCDFGHJKLMNPQRSTVWXZ])-([0-9BCDFGHJKLMNPQRSTVWXZ])$/);
       if (!match) return [component];
-      const [_, prefix, from, to] = match;
-      const i1 = nacChars.indexOf(from);
-      const i2 = nacChars.indexOf(to);
-      if (i1 < 0 || i2 < 0 || i1 > i2) return [component];
-      return nacChars.slice(i1, i2 + 1).split('').map(ch => prefix + ch);
+      const [_, prefix, fromChar, toChar] = match;
+      const i1 = nacChars.indexOf(fromChar);
+      const i2 = nacChars.indexOf(toChar);
+
+      // Handle cases where the range crosses the 180/-180 meridian
+      if (i1 === -1 || i2 === -1) return [component]; // Should not happen with valid NACs
+      if (i1 > i2) {
+          let components = [];
+          for (let i = i1; i < base; i++) components.push(prefix + nacChars[i]);
+          for (let i = 0; i <= i2; i++) components.push(prefix + nacChars[i]);
+          return components;
+      } else {
+          return nacChars.slice(i1, i2 + 1).split('').map(ch => prefix + ch);
+      }
     }
 
+    // Corrected getBoundingBox to accurately define the full bounding box
     function getBoundingBox(lonCodeRaw, latCodeRaw) {
-      const lonCodes = expandNACComponent(lonCodeRaw);
-      const latCodes = expandNACComponent(latCodeRaw);
+      const lonComponents = expandNACComponent(lonCodeRaw);
+      const latComponents = expandNACComponent(latCodeRaw);
 
       let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
 
-      for (const lonCode of lonCodes) {
-        for (const latCode of latCodes) {
-          const nac = `${lonCode} ${latCode}`;
-          const { lat, lon, resolution } = decodeNAC(nac, false);
-          const lat2 = lat + resolution * 180;
-          const lon2 = lon + resolution * 360;
-          minLat = Math.min(minLat, lat);
-          maxLat = Math.max(maxLat, lat2);
-          minLon = Math.min(minLon, lon);
-          maxLon = Math.max(maxLon, lon2);
+      for (const lonComp of lonComponents) {
+        for (const latComp of latComponents) {
+          const nac = `${lonComp} ${latComp}`;
+          const { lat, lon, lonResolution, latResolution } = decodeNAC(nac);
+
+          // For each individual NAC cell, calculate its SW and NE corners
+          const cellSWLat = lat;
+          const cellSWLon = lon;
+          const cellNELat = lat + latResolution;
+          const cellNELon = lon + lonResolution;
+
+          // Update the overall min/max for the entire bounding box
+          minLat = Math.min(minLat, cellSWLat);
+          maxLat = Math.max(maxLat, cellNELat);
+          minLon = Math.min(minLon, cellSWLon);
+          maxLon = Math.max(maxLon, cellNELon);
         }
       }
-
       return L.latLngBounds([minLat, minLon], [maxLat, maxLon]);
     }
 
@@ -121,7 +140,6 @@
         longNorm -= Math.floor(longNorm);
         latNorm -= Math.floor(latNorm);
       }
-
       return lonCode + " " + latCode;
     }
 
@@ -153,14 +171,15 @@
         map.fitBounds(bounds);
       } else if (/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(query)) {
         const [lat, lon] = query.split(',').map(parseFloat);
-        showPointOrBox(lat, lon, 4);
+        // For point, show a marker. The level parameter in showPointOrBox is for NAC resolution.
+        showPointOrBox(lat, lon, 6); // Default to a higher resolution NAC for a point
       } else {
         fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json`)
           .then(res => res.json())
           .then(results => {
             if (results.length > 0) {
               const { lat, lon } = results[0];
-              showPointOrBox(parseFloat(lat), parseFloat(lon), 4);
+              showPointOrBox(parseFloat(lat), parseFloat(lon), 6); // Default to a higher resolution NAC for a point
             } else {
               alert('Location not found');
             }
@@ -168,21 +187,20 @@
       }
     }
 
+    // Refined showPointOrBox to use getBoundingBox for area display
     function showPointOrBox(lat, lon, level) {
       const nac = encodeNAC(level, lon, lat);
       if (marker) map.removeLayer(marker);
       if (boxLayer) map.removeLayer(boxLayer);
 
-      if (level < 4) {
-        const { resolution } = decodeNAC(nac);
-        const sw = [lat - resolution * 90, lon - resolution * 180];
-        const ne = [lat + resolution * 90, lon + resolution * 180];
-        boxLayer = L.rectangle([sw, ne], { color: 'red', weight: 2 }).addTo(map);
-        map.fitBounds([sw, ne]);
-      } else {
-        marker = L.marker([lat, lon]).addTo(map).bindPopup(`NAC: ${nac}`).openPopup();
-        map.setView([lat, lon], 6);
-      }
+      // If the query is a point, display a marker and a small NAC box around it
+      // For general searches, we will display the specific NAC cell's bounding box
+      const [lonCode, latCode] = nac.split(' ');
+      const bounds = getBoundingBox(lonCode, latCode);
+
+      marker = L.marker([lat, lon]).addTo(map).bindPopup(`NAC: ${nac}`).openPopup();
+      boxLayer = L.rectangle(bounds, { color: 'red', weight: 2 }).addTo(map);
+      map.fitBounds(bounds);
     }
 
     searchInput.addEventListener('keydown', function(e) {
@@ -193,3 +211,4 @@
   </script>
 </body>
 </html>
+```
