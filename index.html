@@ -2,7 +2,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>NAC Map with Full Bounding and Hyphen Support</title>
+  <title>NAC Map with Corrected Bounding Box</title>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
@@ -69,8 +69,8 @@
       }
 
       const resolution = Math.pow(base, -level);
-      const lon = lonNorm * 360 - 180 + (center ? resolution * 180 / 2 : 0);
-      const lat = latNorm * 180 - 90 + (center ? resolution * 90 / 2 : 0);
+      const lon = lonNorm * 360 - 180 + (center ? resolution * 180 : 0) / 2;
+      const lat = latNorm * 180 - 90 + (center ? resolution * 180 : 0) / 2;
 
       return { level, lon, lat, resolution };
     }
@@ -96,7 +96,7 @@
         for (const latCode of latCodes) {
           const nac = `${lonCode} ${latCode}`;
           const { lat, lon, resolution } = decodeNAC(nac, false);
-          const lat2 = lat + resolution * 90;
+          const lat2 = lat + resolution * 180;
           const lon2 = lon + resolution * 360;
           minLat = Math.min(minLat, lat);
           maxLat = Math.max(maxLat, lat2);
@@ -175,8 +175,8 @@
 
       if (level < 4) {
         const { resolution } = decodeNAC(nac);
-        const sw = [lat - resolution * 90 / 2, lon - resolution * 180 / 2];
-        const ne = [lat + resolution * 90 / 2, lon + resolution * 180 / 2];
+        const sw = [lat - resolution * 90, lon - resolution * 180];
+        const ne = [lat + resolution * 90, lon + resolution * 180];
         boxLayer = L.rectangle([sw, ne], { color: 'red', weight: 2 }).addTo(map);
         map.fitBounds([sw, ne]);
       } else {
