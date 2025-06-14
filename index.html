@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>NAC Map with Corrected Bounding Box</title>
+  <title>NAC Map</title>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
@@ -136,8 +136,10 @@
       return lonCode + " " + latCode;
     }
 
+    // Modified showNAC function to use a fixed level for 10-character NAC
     function showNAC(lat, lon) {
-      const nac = encodeNAC(5, lon, lat);
+      // 5 characters for longitude + 5 characters for latitude = 10 character NAC
+      const nac = encodeNAC(5, lon, lat); 
       nacBox.innerHTML = `NAC: ${nac} | Lat/Lon: ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
       nacBox.dataset.clipboard = `${nac} (${lat.toFixed(5)}, ${lon.toFixed(5)})`;
     }
@@ -164,14 +166,14 @@
         map.fitBounds(bounds);
       } else if (/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(query)) {
         const [lat, lon] = query.split(',').map(parseFloat);
-        showPointOrBox(lat, lon, 6);
+        showPointOrBox(lat, lon, 6); // You can adjust this level as needed for point searches
       } else {
         fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json`)
           .then(res => res.json())
           .then(results => {
             if (results.length > 0) {
               const { lat, lon } = results[0];
-              showPointOrBox(parseFloat(lat), parseFloat(lon), 6);
+              showPointOrBox(parseFloat(lat), parseFloat(lon), 6); // You can adjust this level as needed for address searches
             } else {
               alert('Location not found');
             }
