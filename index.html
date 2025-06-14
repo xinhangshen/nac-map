@@ -136,12 +136,15 @@
       return lonCode + " " + latCode;
     }
 
-    // Modified showNAC function to use a fixed level for 10-character NAC
-    function showNAC(lat, lon) {
-      // 5 characters for longitude + 5 characters for latitude = 10 character NAC
-      const nac = encodeNAC(5, lon, lat); 
-      nacBox.innerHTML = `NAC: ${nac} | Lat/Lon: ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-      nacBox.dataset.clipboard = `${nac} (${lat.toFixed(5)}, ${lon.toFixed(5)})`;
+    // showNAC function now ensures it's always a level 5 NAC (10 characters)
+    function showNAC(lat, lon, placeName = '') {
+      const nac = encodeNAC(5, lon, lat); // Force level 5 NAC
+      let displayString = `NAC: ${nac} | Lat/Lon: ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+      if (placeName) {
+        displayString += ` | Place: ${placeName}`;
+      }
+      nacBox.innerHTML = displayString;
+      nacBox.dataset.clipboard = `${nac} (${lat.toFixed(5)}, ${lon.toFixed(5)})${placeName ? ` - ${placeName}` : ''}`;
     }
 
     nacBox.onclick = () => {
@@ -154,26 +157,34 @@
     map.on('mousemove', e => showNAC(e.latlng.lat, e.latlng.lng));
 
     function handleSearch() {
-      const query = searchInput.value.trim().toUpperCase();
+      const query = searchInput.value.trim(); // Do not convert to uppercase immediately
       if (!query) return;
 
-      if (/^[0-9BCDFGHJKLMNPQRSTVWXZ\-]+ [0-9BCDFGHJKLMNPQRSTVWXZ\-]+$/.test(query)) {
-        const [lonCodeRaw, latCodeRaw] = query.split(' ');
+      // Check if it's a NAC format
+      if (/^[0-9BCDFGHJKLMNPQRSTVWXZ\-]+ [0-9BCDFGHJKLMNPQRSTVWXZ\-]+$/.test(query.toUpperCase())) {
+        const [lonCodeRaw, latCodeRaw] = query.toUpperCase().split(' '); // Convert to uppercase here
         const bounds = getBoundingBox(lonCodeRaw, latCodeRaw);
         if (boxLayer) map.removeLayer(boxLayer);
         if (marker) map.removeLayer(marker);
         boxLayer = L.rectangle(bounds, { color: 'red', weight: 2 }).addTo(map);
         map.fitBounds(bounds);
-      } else if (/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(query)) {
+        // For NAC search, update the nacBox with the exact NAC from input
+        const decoded = decodeNAC(`${lonCodeRaw} ${latCodeRaw}`);
+        showNAC(decoded.lat, decoded.lon, ''); // Don't show a place name for direct NAC input
+      } 
+      // Check if it's lat,lon format
+      else if (/^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$/.test(query)) {
         const [lat, lon] = query.split(',').map(parseFloat);
-        showPointOrBox(lat, lon, 6); // You can adjust this level as needed for point searches
-      } else {
+        showPointOrBox(lat, lon, 5); // Use level 5 for explicit lat,lon input
+      } 
+      // Assume it's a place name or address
+      else {
         fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json`)
           .then(res => res.json())
           .then(results => {
             if (results.length > 0) {
-              const { lat, lon } = results[0];
-              showPointOrBox(parseFloat(lat), parseFloat(lon), 6); // You can adjust this level as needed for address searches
+              const { lat, lon, display_name } = results[0]; // Get display_name
+              showPointOrBox(parseFloat(lat), parseFloat(lon), 5, display_name); // Pass level 5 and display_name
             } else {
               alert('Location not found');
             }
@@ -181,7 +192,8 @@
       }
     }
 
-    function showPointOrBox(lat, lon, level) {
+    // showPointOrBox now accepts an optional placeName argument
+    function showPointOrBox(lat, lon, level, placeName = '') {
       const nac = encodeNAC(level, lon, lat);
       if (marker) map.removeLayer(marker);
       if (boxLayer) map.removeLayer(boxLayer);
@@ -189,9 +201,18 @@
       const [lonCode, latCode] = nac.split(' ');
       const bounds = getBoundingBox(lonCode, latCode);
 
-      marker = L.marker([lat, lon]).addTo(map).bindPopup(`NAC: ${nac}`).openPopup();
+      // Construct popup content including place name if available
+      let popupContent = `NAC: ${nac}<br>Lat/Lon: ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+      if (placeName) {
+        popupContent += `<br>${placeName}`;
+      }
+
+      marker = L.marker([lat, lon]).addTo(map).bindPopup(popupContent).openPopup();
       boxLayer = L.rectangle(bounds, { color: 'red', weight: 2 }).addTo(map);
       map.fitBounds(bounds);
+
+      // Update the nacBox at the bottom with the formatted info
+      showNAC(lat, lon, placeName);
     }
 
     searchInput.addEventListener('keydown', function(e) {
@@ -200,7 +221,7 @@
       }
     });
 
-    // New code to handle URL parameters on page load
+    // Handle URL parameters on page load
     window.onload = function() {
       const params = new URLSearchParams(window.location.search);
       const nacFromUrl = params.get('input');
